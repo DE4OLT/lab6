@@ -1,154 +1,141 @@
-from datetime import datetime, date
-
-class Medicine:
-    def __init__(self, name: str, price: float, quantity: int,
-                 is_prescription: bool, expiration_date: date):
-        self._name = name
-        self._price = price
-        self._quantity = quantity
-        self._is_prescription = is_prescription
-        self._expiration_date = expiration_date
-
-    @property
-    def name(self):
-        return self._name
-
-    @name.setter
-    def name(self, value: str):
-        self._name = value
-
-    @property
-    def price(self):
-        return self._price
-
-    @price.setter
-    def price(self, value: float):
-        if value < 0:
-            raise ValueError("Ціна не може бути від’ємною")
-        self._price = value
-
-    @property
-    def quantity(self):
-        return self._quantity
-
-    @quantity.setter
-    def quantity(self, value: int):
-        if value < 0:
-            raise ValueError("Кількість не може бути від’ємною")
-        self._quantity = value
-
-    @property
-    def is_prescription(self):
-        return self._is_prescription
-
-    @is_prescription.setter
-    def is_prescription(self, value: bool):
-        self._is_prescription = bool(value)
-
-    @property
-    def expiration_date(self):
-        return self._expiration_date
-
-    @expiration_date.setter
-    def expiration_date(self, value: date):
-        self._expiration_date = value
-
-    def is_expired(self, current_date: date) -> bool:
-        return self._expiration_date < current_date
-
-    def apply_discount(self, percent: float):
-        self.price = self.price * (1 - percent / 100)
-
-    def __str__(self):
-        return (f"Назва: {self.name}, ціна: {self.price:.2f} грн, "
-                f"кількість: {self.quantity}, рецепт: "
-                f"{'так' if self.is_prescription else 'ні'}, "
-                f"придатні до: {self.expiration_date.isoformat()}")
-
-    def __del__(self):
-        pass
+import os
+import json
+import logging
+from functools import wraps
 
 
-class Pharmacy:
-    def __init__(self, name: str):
-        self._name = name
-        self._medicines: list[Medicine] = []
-
-    def add_medicine(self, medicine: Medicine):
-        self._medicines.append(medicine)
-
-    def remove_medicine_by_name(self, name: str):
-        before = len(self._medicines)
-        self._medicines = [m for m in self._medicines if m.name != name]
-        removed = before - len(self._medicines)
-        print(f"Видалено {removed} позицій '{name}'")
-
-    def remove_expired(self, current_date: date):
-        before = len(self._medicines)
-        self._medicines = [m for m in self._medicines if not m.is_expired(current_date)]
-        removed = before - len(self._medicines)
-        print(f"Під час переобліку видалено {removed} прострочених позицій")
-
-    def apply_discount_to_all(self, percent: float = 10.0):
-        for m in self._medicines:
-            m.apply_discount(percent)
-
-    def get_cheapest_medicines(self) -> list[Medicine]:
-        if not self._medicines:
-            return []
-        min_price = min(m.price for m in self._medicines)
-        return [m for m in self._medicines if abs(m.price - min_price) < 1e-9]
-
-    def show_all_medicines(self):
-        print(f"\nАсортимент аптеки '{self._name}':")
-        if not self._medicines:
-            print("  (порожньо)")
-        for m in self._medicines:
-            print("  -", m)
+class FileError(Exception):
+    pass
 
 
-def parse_date(date_str: str) -> date:
-    return datetime.strptime(date_str, "%Y-%m-%d").date()
+class FileNotFound(FileError):
+    pass
 
 
-def main():
-    today = date.today()
+class FileCorrupted(FileError):
+    pass
 
-    pharmacy = Pharmacy("Здорова сім'я")
 
-    med1 = Medicine("Парацетамол", 80.0, 50, False, parse_date("2026-01-01"))
-    med2 = Medicine("Антибіотик А", 250.0, 20, True, parse_date("2024-05-01"))
-    med3 = Medicine("Вітамін C", 60.0, 100, False, parse_date("2023-12-01"))
-    med4 = Medicine("Сироп від кашлю", 120.0, 30, False, parse_date("2025-07-15"))
+def logged(exc_type, mode: str = "console"):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            logger = logging.getLogger("file_logger")
+            logger.setLevel(logging.ERROR)
 
-    pharmacy.add_medicine(med1)
-    pharmacy.add_medicine(med2)
-    pharmacy.add_medicine(med3)
-    pharmacy.add_medicine(med4)
+            if not logger.handlers:
+                if mode == "console":
+                    handler = logging.StreamHandler()
+                elif mode == "file":
+                    handler = logging.FileHandler("file_operations.log", encoding="utf-8")
+                else:
+                    raise ValueError("Unknown logging mode")
 
-    print("Початковий асортимент:")
-    pharmacy.show_all_medicines()
+                formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+                handler.setFormatter(formatter)
+                logger.addHandler(handler)
 
-    print("\n=== Переоблік (видалення прострочених ліків) ===")
-    pharmacy.remove_expired(today)
-    pharmacy.show_all_medicines()
+            try:
+                return func(*args, **kwargs)
+            except exc_type as e:
+                logger.error("Помилка у методі %s: %s", func.__name__, str(e))
+                raise
+        return wrapper
+    return decorator
 
-    print("\n=== Застосування знижки 10% на всі ліки ===")
-    pharmacy.apply_discount_to_all(10.0)
-    pharmacy.show_all_medicines()
 
-    print("\n=== Найдешевші ліки в аптеці ===")
-    cheapest = pharmacy.get_cheapest_medicines()
-    if not cheapest:
-        print("Немає ліків.")
-    else:
-        for m in cheapest:
-            print("  *", m)
+class JsonFileManager:
+    def __init__(self, filepath: str):
+        self.filepath = filepath
 
-    print("\n=== Видалення препарату 'Парацетамол' ===")
-    pharmacy.remove_medicine_by_name("Парацетамол")
-    pharmacy.show_all_medicines()
+        if not os.path.exists(self.filepath):
+            raise FileNotFound(f"Файл '{self.filepath}' не знайдено")
+
+        try:
+            with open(self.filepath, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content == "":
+                    self._init_empty_json()
+                else:
+                    f.seek(0)
+                    json.load(f)
+        except Exception as e:
+            raise FileCorrupted(f"Файл '{self.filepath}' пошкоджено: {e}")
+
+    @staticmethod
+    @logged(FileError, mode="file")
+    def create_file(filepath: str, initial_data=None):
+        if initial_data is None:
+            initial_data = []
+
+        try:
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(initial_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            raise FileCorrupted(f"Неможливо створити файл '{filepath}': {e}")
+
+        return JsonFileManager(filepath)
+
+    def _init_empty_json(self):
+        with open(self.filepath, "w", encoding="utf-8") as f:
+            json.dump([], f, ensure_ascii=False, indent=2)
+
+    @logged(FileError, mode="console")
+    def read(self):
+        try:
+            with open(self.filepath, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise FileNotFound(f"Файл '{self.filepath}' не знайдено")
+        except Exception as e:
+            raise FileCorrupted(f"Помилка читання файлу '{self.filepath}': {e}")
+
+    @logged(FileError, mode="file")
+    def write(self, data):
+        try:
+            # Сортування від Я → А
+            if isinstance(data, list):
+                data = sorted(data, key=lambda x: x["name"], reverse=True)
+
+            with open(self.filepath, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+        except Exception as e:
+            raise FileCorrupted(f"Помилка запису у файл '{self.filepath}': {e}")
+
+    @logged(FileError, mode="file")
+    def append(self, item):
+        try:
+            data = self.read()
+
+            if not isinstance(data, list):
+                raise FileCorrupted("JSON має бути списком для append()")
+
+            data.append(item)
+
+            # Сортування після додавання
+            data = sorted(data, key=lambda x: x["name"], reverse=True)
+
+            self.write(data)
+
+        except FileError:
+            raise
 
 
 if __name__ == "__main__":
-    main()
+    path = "data.json"
+
+    if not os.path.exists(path):
+        manager = JsonFileManager.create_file(path, initial_data=[])
+    else:
+        manager = JsonFileManager(path)
+
+    # Початковий список імен
+    manager.write([
+        {"name": "Роман"},
+        {"name": "Василь"},
+        {"name": "Андрій"},
+        {"name": "Дмитро"}   # ← ДОДАНЕ ІМ’Я
+    ])
+
+    print(manager.read())
