@@ -93,7 +93,7 @@ class JsonFileManager:
     @logged(FileError, mode="file")
     def write(self, data):
         try:
-            # Сортування від Я → А
+            # Sort by Я → А
             if isinstance(data, list):
                 data = sorted(data, key=lambda x: x["name"], reverse=True)
 
@@ -113,7 +113,7 @@ class JsonFileManager:
 
             data.append(item)
 
-            # Сортування після додавання
+            # Sorting after addition
             data = sorted(data, key=lambda x: x["name"], reverse=True)
 
             self.write(data)
@@ -130,7 +130,7 @@ if __name__ == "__main__":
     else:
         manager = JsonFileManager(path)
 
-    # Початковий список імен
+    # Initial list of names
     manager.write([
         {"name": "Роман"},
         {"name": "Василь"},
