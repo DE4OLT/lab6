@@ -56,10 +56,9 @@ class JsonFileManager:
                 content = f.read().strip()
                 if content == "":
                     self._init_empty_json()
-                else:
-                    f.seek(0)
-                    json.load(f)
-        except Exception as e:
+                return
+                     json.loads(content)
+        except json.JSONDecodeError as e:
             raise FileCorrupted(f"Файл '{self.filepath}' пошкоджено: {e}")
 
     @staticmethod
